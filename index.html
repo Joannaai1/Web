@@ -1,0 +1,714 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>睡眠积分看板</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="vendor/chart.umd.min.js"></script>
+<style>
+:root{--bg:#0f1424;--card:#171e33;--line:#26304d;--tx:#e6e9f2;--mut:#8b93ad;--acc:#f2c46d;--good:#6fcf97;--bad:#ef7d7d;--blue:#7aa2f7}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font-family:"Noto Sans SC",system-ui,sans-serif;font-size:15px}
+.wrap{max-width:1100px;margin:0 auto;padding:24px 16px 60px}
+h1{font-size:22px;margin:0 0 4px}.sub{color:var(--mut);font-size:13px;margin-bottom:20px}
+.grid{display:grid;gap:14px}.k4{grid-template-columns:repeat(4,1fr)}.k2{grid-template-columns:1.3fr 1fr}
+@media(max-width:800px){.k4{grid-template-columns:repeat(2,1fr)}.k2{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0;font-variant-numeric:tabular-nums lining-nums}
+.lab{color:var(--mut);font-size:12px}.big{font-size:30px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums}
+h2{font-size:15px;margin:0 0 12px}
+.bar{height:10px;background:#0c1120;border-radius:6px;overflow:hidden;margin:8px 0 4px}.bar i{display:block;height:100%;background:var(--acc);border-radius:6px;transition:width .4s}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input,select,button{font:inherit;color:var(--tx);background:#0c1120;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+button{cursor:pointer;background:var(--acc);color:#1a1405;border:none;font-weight:600}button.ghost{background:transparent;color:var(--tx);border:1px solid var(--line)}
+button:disabled{opacity:.35;cursor:not-allowed}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 6px;border-bottom:1px solid var(--line);text-align:left}th{color:var(--mut);font-weight:500}
+.p{color:var(--good)}.n{color:var(--bad)}.tag{font-size:11px;padding:2px 6px;border-radius:5px;background:#26304d;color:var(--mut)}
+.rules td:last-child,.rules th:last-child{text-align:right;font-weight:600}.scroll{max-height:320px;overflow:auto}.checks{display:flex;gap:8px 14px;flex-wrap:wrap;margin-top:10px}.checks label{display:inline-flex;align-items:center;gap:5px;font-size:13px;cursor:pointer}.checks input{accent-color:var(--acc);margin:0}.note{line-height:1.65;margin-top:8px}.mode{color:var(--acc)}:root{color-scheme:dark}
+.del{background:none;color:var(--mut);padding:2px 6px}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--acc);color:#1a1405;padding:10px 16px;border-radius:10px;opacity:0;transition:.3s;font-weight:600}
+.save-line{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:baseline;margin-top:8px}.save-state{display:inline-flex;align-items:center;gap:6px;color:var(--mut)}.save-state::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}.save-state[data-kind="ok"]{color:var(--good)}.save-state[data-kind="warn"]{color:var(--acc)}.save-state[data-kind="bad"]{color:var(--bad)}.save-line .link{color:var(--acc);background:none;border:0;padding:2px 4px;font-size:13px}
+dialog{width:min(420px,calc(100% - 32px));border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--tx);padding:20px}dialog::backdrop{background:#070a13bb}dialog p{margin:0 0 16px;line-height:1.6}dialog .row{justify-content:flex-end}
+@media(max-width:480px){input[type="date"],input[type="time"],button{min-height:44px}input[type="date"],input[type="time"]{font-size:16px}.checks label{min-height:34px}.del{min-height:38px}}
+</style></head><body><div class="wrap">
+<h1>睡眠积分看板</h1><div class="sub">记录熄灯时间，攒分兑换出游。
+ <div class="save-line"><span class="save-state" id="saveState" role="status">正在检查自动保存…</span><button class="link" id="retrySave" hidden onclick="persist()">重试保存</button><span id="saveHint">记录仅留在当前浏览器，不跨设备同步。</span></div></div>
+
+<div class="grid k4">
+ <div class="card"><div class="lab">可用积分</div><div class="big" id="kBal">0</div></div>
+ <div class="card"><div class="lab">本周得分</div><div class="big" id="kWeek">0</div></div>
+ <div class="card"><div class="lab">连续熄灯达标</div><div class="big" id="kStreak">0 天</div></div>
+ <div class="card"><div class="lab">近 30 天平均熄灯</div><div class="big" id="kAvg">--</div></div>
+</div>
+
+<div class="grid k2" style="margin-top:14px">
+ <div class="card"><h2>记录今晚</h2>
+  <div class="row"><input type="date" id="d" aria-label="入睡当晚日期"><input type="time" id="t" aria-label="熄灯时间" value="21:30"><button id="record" onclick="add()" disabled>记录</button></div>
+  <div class="checks"><label><input type="checkbox" id="holiday">节假日宽限</label><label><input type="checkbox" id="phone">熄灯前 30 分钟放下手机 +1</label></div>
+  <div class="lab note" id="preview" aria-live="polite"></div>
+  <h2 style="margin-top:18px">兑换奖励</h2>
+  <div><b>香港周边玩</b> <span class="tag">10 分</span><div class="bar"><i id="b10"></i></div>
+   <div class="row" style="justify-content:space-between"><span class="lab" id="t10"></span><button id="r10" aria-label="兑换香港周边玩，扣10分" onclick="redeem(10)" disabled>兑换</button></div></div>
+  <div style="margin-top:12px"><b>周末外地游</b> <span class="tag">40 分</span><div class="bar"><i id="b40" style="background:var(--blue)"></i></div>
+   <div class="row" style="justify-content:space-between"><span class="lab" id="t40"></span><button id="r40" aria-label="兑换周末外地游，扣40分" onclick="redeem(40)" disabled>兑换</button></div></div>
+  <div class="lab note">两种奖励共用余额，兑换即扣分。</div>
+ </div>
+ <div class="card"><h2>计分规则</h2><table class="rules"><thead><tr><th>平日熄灯</th><th>宽限夜熄灯</th><th>基础分</th></tr></thead><tbody>
+  <tr><td>最迟 21:30</td><td>最迟 22:00</td><td class="p">+3</td></tr>
+  <tr><td>21:31–22:00</td><td>22:01–22:30</td><td class="p">+2</td></tr>
+  <tr><td>22:01–22:30</td><td>22:31–23:00</td><td class="p">+1</td></tr>
+  <tr><td>22:31–23:00</td><td>23:01–23:30</td><td>0</td></tr>
+  <tr><td>23:01–23:30</td><td>23:31–次日 00:00</td><td class="n">−1</td></tr>
+  <tr><td>23:31–次日 00:00</td><td>次日 00:01–00:30</td><td class="n">−2</td></tr>
+  <tr><td>次日 00:01 起</td><td>次日 00:31 起</td><td class="n">−3</td></tr></tbody></table>
+  <div class="lab note">周五、周六晚自动宽限 30 分钟。节假日手动勾选，宽限不叠加。</div>
+  <div class="lab note">平日最迟 23:00、宽限夜最迟 23:30 算达标（含 0 分档）。每连续达标 7 晚额外 +3，习惯分不影响达标。</div>
+  <div class="lab note">凌晨 00:00–04:59 熄灯请选择前一晚的日期。</div></div>
+</div>
+
+<div class="card" style="margin-top:14px"><h2>近 30 天熄灯时间与得分</h2><div style="height:240px"><canvas id="ch"></canvas></div></div>
+
+<div class="grid k2" style="margin-top:14px">
+ <div class="card"><h2>睡眠记录</h2><div class="scroll"><table><thead><tr><th>日期</th><th>熄灯</th><th>得分</th><th></th></tr></thead><tbody id="log"></tbody></table></div></div>
+ <div class="card"><h2>积分流水</h2><div class="scroll"><table><thead><tr><th>日期</th><th>事项</th><th>积分</th></tr></thead><tbody id="ledger"></tbody></table></div>
+  <div class="row" style="margin-top:12px"><button class="ghost" id="exportBtn" onclick="exp()" disabled>导出备份</button><button class="ghost" id="importBtn" onclick="document.getElementById('importFile').click()" disabled>导入</button><input type="file" id="importFile" accept=".json,application/json" hidden onchange="imp(this)"></div>
+  <div class="lab note" id="backupNote" aria-live="polite">导入会替换当前记录，旧版积分与兑换会保留。</div></div>
+</div>
+</div><div id="toast" role="status"></div>
+<dialog id="restoreDialog" aria-labelledby="restoreTitle"><h2 id="restoreTitle">替换当前睡眠记录？</h2><p>导入会替换当前的睡眠记录和兑换流水。若要保留现有数据，请先取消并导出备份。</p><form method="dialog" class="row"><button class="ghost" value="cancel" autofocus>取消</button><button value="replace">确认导入</button></form></dialog>
+<script>
+const $=id=>document.getElementById(id);
+const d=$('d'),t=$('t'),holiday=$('holiday'),phone=$('phone');
+const DAY=86400000, rewards={10:'香港周边玩',40:'周末外地游',50:'周末外地游'};
+let S={version:2,logs:[],redeems:[]},chart,timer,ready=false,cache=null,pendingImport=null;
+let writes=Promise.resolve(),writeNumber=0,dirty=false;
+const STORE='sleep-dashboard-data-v1';
+const key=()=>new URL('/__sleep-dashboard-data__/records.json',location.origin).href;
+function saveStatus(message,kind=''){
+ const el=$('saveState');el.textContent=message;el.dataset.kind=kind;
+}
+function productionContext(){
+ const host=location.hostname;
+ const standalone=location.protocol==='https:'&&host.endsWith('.pplx.app')&&host!=='sites.pplx.app'&&!host.startsWith('preview--');
+ return window.top===window&&window.isSecureContext&&(standalone||host==='localhost'||host==='127.0.0.1');
+}
+function persist(){
+ if(!cache)return;
+ const snapshot=JSON.stringify(S),seq=++writeNumber;
+ dirty=true;$('retrySave').hidden=true;saveStatus('正在保存…');
+ writes=writes.catch(()=>{}).then(async()=>{
+  await cache.put(key(),new Response(snapshot,{headers:{'Content-Type':'application/json'}}));
+ }).then(()=>{
+  if(seq===writeNumber){dirty=false;saveStatus('已自动保存','ok')}
+ },()=>{
+  if(seq===writeNumber){saveStatus('自动保存失败，请重试或导出备份','bad');$('retrySave').hidden=false}
+ });
+}
+async function boot(){
+ if(productionContext()){
+  try{
+   const store=await window.caches.open(STORE);
+   const stored=await store.match(key());
+   if(stored)S=normalize(await stored.json());
+   cache=store;
+   saveStatus(stored?'已恢复上次记录':'自动保存已开启','ok');
+  }catch{
+   saveStatus('此浏览器暂无法自动保存','bad');
+   $('saveHint').textContent='请用导出备份保存，刷新后可重新导入。';
+  }
+ }else{
+  saveStatus('预览模式，不自动保存','warn');
+  $('saveHint').textContent='离开前请导出备份；发布版可自动保存。';
+ }
+ ready=true;$('exportBtn').disabled=$('importBtn').disabled=false;
+ loadDate();render();
+}
+const mins=time=>{const [h,m]=time.split(':').map(Number);return (h<5?h+24:h)*60+m};
+const fmt=x=>{x=Math.round(x);return [Math.floor(x/60)%24,x%60].map(n=>String(n).padStart(2,'0')).join(':')};
+const shift=(date,n)=>new Date(Date.parse(date)+n*DAY).toISOString().slice(0,10);
+const weekday=date=>new Date(date).getUTCDay();
+const hkClock=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Hong_Kong',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hourCycle:'h23'});
+function today(){
+ const p=Object.fromEntries(hkClock.formatToParts(new Date()).map(p=>[p.type,p.value]));
+ return shift(`${p.year}-${p.month}-${p.day}`,Number(p.hour)<5?-1:0);
+}
+const validDate=x=>typeof x==='string'&&/^\d{4}-\d\d-\d\d$/.test(x)&&Number.isFinite(Date.parse(x))&&shift(x,0)===x;
+const validTime=x=>typeof x==='string'&&/^([01]\d|2[0-3]):[0-5]\d$/.test(x);
+const allowedDate=x=>validDate(x)&&x<=today();
+const isWeekend=date=>[5,6].includes(weekday(date));
+const grace=l=>l.rule>=2&&(isWeekend(l.date)||l.holiday);
+const adjusted=l=>mins(l.time)-(grace(l)?30:0);
+const scoringMinute=l=>adjusted(l)-(l.rule===3?1:0);
+const base=l=>{const x=scoringMinute(l);return x<1290?3:x<1320?2:x<(l.rule===1?1380:1350)?1:x<1380?0:x<1410?-1:x<1440?-2:-3};
+const habits=l=>Number(l.wake)+Number(l.phone);
+const score=l=>base(l)+habits(l);
+const sign=n=>n>0?'+'+n:n<0?'−'+Math.abs(n):'0';
+const tone=n=>n>0?'p':n<0?'n':'';
+const newest=(a,b)=>b.date.localeCompare(a.date);
+// Keep already earned points from the retired habit without awarding it on new nights.
+const draft=()=>{
+ const previous=S.logs.find(l=>l.date===d.value);
+ const rule=previous?.time===t.value&&previous.holiday===holiday.checked?previous.rule:3;
+ return {date:d.value,time:t.value,rule,holiday:rule!==1&&holiday.checked,wake:previous?.wake||false,phone:phone.checked};
+};
+function toast(message){
+ const el=$('toast');el.textContent=message;el.style.opacity=1;
+ clearTimeout(timer);timer=setTimeout(()=>el.style.opacity=0,2200);
+}
+function save(){
+ if(cache)persist();
+ render();upd();$('backupNote').textContent=cache?'可以导出备份；导入会替换当前记录。':'有未导出的变更，离开前请导出备份。导入会替换当前记录。';
+}
+function add(){
+ const l=draft();if(!ready||!allowedDate(l.date)||!validTime(l.time))return;
+ const exists=S.logs.some(x=>x.date===l.date);
+ S.logs=S.logs.filter(x=>x.date!==l.date);S.logs.push(l);save();
+ toast(`${exists?'已更新':'已记录'} ${sign(score(l))} 分`);
+}
+function del(date){S.logs=S.logs.filter(l=>l.date!==date);loadDate();save();toast('已删除记录')}
+function redeem(cost){
+ if(!ready||![10,40].includes(cost)||bal()<cost)return;
+ S.redeems.push({date:today(),cost,name:rewards[cost]});save();toast('已兑换：'+rewards[cost]);
+}
+function bonuses(){
+ let run=0,prev=null;const out=[];
+ for(const l of [...S.logs].sort((a,b)=>newest(b,a))){
+  run=scoringMinute(l)<1380?(prev===shift(l.date,-1)?run+1:1):0;
+  prev=l.date;
+  if(run&&run%7===0)out.push({date:l.date,pts:3});
+ }
+ return {out,run,last:prev};
+}
+function bal(bn=bonuses()){
+ return S.logs.reduce((s,l)=>s+score(l),0)+bn.out.length*3-S.redeems.reduce((s,r)=>s+r.cost,0);
+}
+function render(){
+ const bn=bonuses(),b=bal(bn),now=today(),mon=shift(now,-((weekday(now)+6)%7));
+ const nights=Object.fromEntries(S.logs.map(l=>[l.date,l])),extra=Object.fromEntries(bn.out.map(l=>[l.date,l.pts]));
+ const days=Array.from({length:30},(_,i)=>shift(now,i-29));
+ const shown=days.map(date=>nights[date]).filter(Boolean);
+ $('kBal').textContent=b;
+ $('kWeek').textContent=sign(S.logs.filter(l=>l.date>=mon&&l.date<=now).reduce((s,l)=>s+score(l)+(extra[l.date]||0),0));
+ $('kStreak').textContent=(bn.last>=shift(now,-1)&&bn.last<=now?bn.run:0)+' 天';
+ $('kAvg').textContent=shown.length?fmt(shown.reduce((s,l)=>s+mins(l.time),0)/shown.length):'--';
+ for(const c of [10,40]){
+  $('b'+c).style.width=Math.min(100,Math.max(0,b/c*100))+'%';
+  $('t'+c).textContent=b>=c?'可兑换 '+Math.floor(b/c)+' 次':'还差 '+(c-b)+' 分';
+  $('r'+c).disabled=!ready||b<c;
+ }
+ $('log').innerHTML=[...S.logs].sort(newest).map(l=>{
+  const tags=[l.rule<3?'旧规则':'',grace(l)?'宽限':'',habits(l)?`习惯 +${habits(l)}`:''].filter(Boolean);
+  return `<tr><td>${l.date}</td><td>${l.time}${tags.length?`<div class="lab">${tags.join(' · ')}</div>`:''}</td><td class="${tone(score(l))}">${sign(score(l))}</td><td><button class="del" onclick="del('${l.date}')">删除</button></td></tr>`;
+ }).join('')||'<tr><td colspan="4" class="lab">还没有记录，从今晚开始吧</td></tr>';
+ const led=[...S.logs.map(l=>({date:l.date,n:'熄灯 '+l.time,p:base(l)})),
+  ...S.logs.filter(l=>habits(l)).map(l=>({date:l.date,n:'习惯加分',p:habits(l)})),
+  ...bn.out.map(l=>({date:l.date,n:'连续 7 晚奖励',p:l.pts})),
+  ...S.redeems.map(l=>({date:l.date,n:'兑换：'+rewards[l.cost],p:-l.cost}))].sort(newest);
+ $('ledger').innerHTML=led.map(l=>`<tr><td>${l.date}</td><td>${l.n}</td><td class="${tone(l.p)}">${sign(l.p)}</td></tr>`).join('')||'<tr><td colspan="3" class="lab">暂无</td></tr>';
+ const pts=days.map(x=>nights[x]?score(nights[x])+(extra[x]||0):null);
+ const data={labels:days.map(x=>x.slice(5)),datasets:[
+  {type:'bar',label:'得分（含加分）',data:pts,backgroundColor:pts.map(x=>x>0?'#6fcf97':'#ef7d7d'),yAxisID:'y1',borderRadius:3},
+  {type:'line',label:'熄灯时间',data:days.map(x=>nights[x]?mins(nights[x].time):null),borderColor:'#f2c46d',pointRadius:3,spanGaps:true,yAxisID:'y'}]};
+ const opt={maintainAspectRatio:false,plugins:{legend:{labels:{color:'#aab2ca'}},tooltip:{callbacks:{label:c=>c.datasetIndex?'熄灯 '+fmt(c.raw):'得分 '+sign(c.raw)}}},scales:{x:{ticks:{color:'#aab2ca',maxTicksLimit:10},grid:{display:false}},y:{reverse:true,suggestedMin:1230,suggestedMax:1470,ticks:{color:'#aab2ca',maxTicksLimit:7,callback:fmt},grid:{color:'#26304d'}},y1:{position:'right',suggestedMin:-3,suggestedMax:5,ticks:{color:'#aab2ca',precision:0},grid:{display:false}}}};
+ if(chart){chart.data=data;chart.update()}else if(typeof Chart!=='undefined'){chart=new Chart($('ch'),{data,options:opt})}
+ else if(!$('chartNote')){$('ch').parentElement.insertAdjacentHTML('beforeend','<div class="lab" id="chartNote">趋势图暂不可用，仍可查看下方睡眠记录。</div>')}
+}
+function upd(){
+ const l=draft(),ok=allowedDate(l.date)&&validTime(l.time);
+ $('record').disabled=!ready||!ok;
+ const existing=S.logs.find(x=>x.date===l.date);
+ $('record').textContent=existing?'更新记录':'记录';
+ $('preview').innerHTML=!ok?'请选择有效的日期和熄灯时间（香港时间）。':
+  `<span class="mode">${grace(l)?'宽限夜':'平日'}</span> · 基础 ${sign(base(l))} · 习惯 ${sign(habits(l))} · 合计 <b class="${tone(score(l))}">${sign(score(l))} 分</b>${l.wake?'<br>已保留该晚的历史习惯加分 +1。':''}${existing&&existing.rule<3?(l.rule===3?'<br>保存后将按新规则计分。':'<br>此记录沿用旧版熄灯计分规则。'):''}`;
+}
+function loadDate(){
+ const l=S.logs.find(x=>x.date===d.value);
+ t.value=l?.time||'21:30';
+ holiday.checked=l?.holiday||false;phone.checked=l?.phone||false;
+ upd();
+}
+function exp(){
+ if(!ready)return;
+ const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S)],{type:'application/json'}));a.download='sleep-backup.json';
+ document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+ $('backupNote').textContent=cache?'请保留备份文件，换设备或浏览器时可导入恢复。':'请保留下载的备份文件，下次打开时导入即可继续。';
+}
+function normalize(data){
+ if(!data||![undefined,2].includes(data.version)||!Array.isArray(data.logs)||!Array.isArray(data.redeems))throw Error();
+ const seen=new Set();
+ const logs=data.logs.map(l=>{
+  if(!l||!validDate(l.date)||!validTime(l.time)||seen.has(l.date))throw Error();
+  if(data.version===2&&(![1,2,3].includes(l.rule)||['holiday','wake','phone'].some(k=>typeof l[k]!=='boolean')))throw Error();
+  seen.add(l.date);const rule=data.version===2?l.rule:1;
+  return {date:l.date,time:l.time,rule,holiday:rule>=2&&l.holiday,wake:rule>=2&&l.wake,phone:data.version===2&&l.phone};
+ });
+ const redeems=data.redeems.map(r=>{
+  if(!r||!validDate(r.date)||![10,40,50].includes(r.cost))throw Error();
+  return {date:r.date,cost:r.cost,name:rewards[r.cost]};
+ });
+ return {version:2,logs,redeems};
+}
+async function imp(input){
+ const file=input.files[0];if(!ready||!file)return;
+ input.value='';
+ try{
+  const next=normalize(JSON.parse(await file.text()));
+  if(S.logs.length||S.redeems.length){
+   pendingImport=next;const dialog=$('restoreDialog');dialog.returnValue='cancel';dialog.showModal();
+  }else applyImport(next);
+ }catch{
+  $('backupNote').textContent='无法导入：请选择有效的睡眠积分备份。当前记录未改变。';
+ }
+}
+function applyImport(next){
+ S=next;loadDate();save();
+ $('backupNote').textContent='已导入备份；旧版记录仍按原分数和原兑换金额显示。';
+ toast('已导入备份');
+}
+$('restoreDialog').addEventListener('close',()=>{
+ const next=pendingImport;pendingImport=null;
+ if(next&&$('restoreDialog').returnValue==='replace')applyImport(next);
+});
+window.addEventListener('beforeunload',event=>{
+ if(dirty){event.preventDefault();event.returnValue=''}
+});
+d.max=d.value=today();
+d.onchange=loadDate;
+for(const el of [t,holiday,phone])el.oninput=upd;
+boot();
+</script><script data-pplx-inline-edit>
+(function () {
+  if (window === window.top) return;
+
+  const allowedParentOrigins = ["https://www.perplexity.ai","https://perplexity.ai","https://testing.perplexity.ai","https://staging.perplexity.ai","https://*.preview.i.perplexity.ai","http://perplexity.localhost","http://localhost:1420","http://127.0.0.1:1420","http://localhost:3000","http://127.0.0.1:3000","http://localhost:5173","http://127.0.0.1:5173"];
+  const MAX_FONT_BYTES = 500 * 1024;
+  const MAX_TOTAL_FONT_BYTES = 2 * 1024 * 1024;
+  const DEFAULT_LINE_HEIGHT = 16;
+  let scrollForwarding = false;
+  let scrollRaf = 0;
+  let trustedTopOrigin = null;
+
+  // Allow entries like "https://*.preview.i.perplexity.ai" — the wildcard
+  // matches a single DNS label (no dots), so "https://*.foo" cannot stretch
+  // across multiple labels.
+  function matchesAllowedOrigin(origin) {
+    if (!origin) return false;
+    for (const entry of allowedParentOrigins) {
+      if (!entry.includes("*")) {
+        if (entry === origin) return true;
+        continue;
+      }
+      const pattern = new RegExp(
+        "^" +
+          entry.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^.]+") +
+          "$",
+      );
+      if (pattern.test(origin)) return true;
+    }
+    return false;
+  }
+
+  // Trust decision: when the sender is same-origin-visible (event.origin is a
+  // real origin like https://www.perplexity.ai) we trust event.origin directly.
+  // When event.origin is "null" (opaque broker srcdoc), we fall back to the
+  // broker's stamped `parentOrigin` to identify the top window. The fallback
+  // is claim-only — we rely on the browser's native `targetOrigin` enforcement
+  // on the response path (see postToTrustedTop) to ensure replies can't be
+  // delivered to anyone but the actual top window of that claimed origin.
+  function getTrustedParentOrigin(event) {
+    const forwardedParentOrigin =
+      typeof event.data.parentOrigin === "string" ? event.data.parentOrigin : null;
+    const parentOrigin = event.origin === "null" ? forwardedParentOrigin : event.origin;
+    return matchesAllowedOrigin(parentOrigin) ? parentOrigin : null;
+  }
+
+  // All responses go to window.top with targetOrigin = the allowlisted origin.
+  // An attacker that iframes us inside their own null-origin broker can claim
+  // any parentOrigin they like, but the browser will drop the reply whenever
+  // the real top's origin doesn't match — so the screenshot never leaves.
+  function postToTrustedTop(message) {
+    if (!trustedTopOrigin) return;
+    try {
+      window.top.postMessage(message, trustedTopOrigin);
+    } catch (_error) {}
+  }
+
+  const PICK_CAPABILITIES = ["pick"];
+  const PICK_CHAIN_LENGTH = 4;
+  const PICK_MAX_TEXT_CHARS = 120;
+  const PICK_MAX_HTML_CHARS = 300;
+
+  function truncate(value, maxChars) {
+    return value.length > maxChars ? value.slice(0, maxChars - 1) + "…" : value;
+  }
+
+  function isPickableElement(element) {
+    return (
+      element instanceof Element &&
+      element !== document.documentElement &&
+      element !== document.body
+    );
+  }
+
+  function resolvePickTarget(x, y) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    const element = document.elementFromPoint(x, y);
+    return isPickableElement(element) ? element.closest("svg") || element : null;
+  }
+
+  function pickLabel(element) {
+    if (element.id) return element.localName + "#" + element.id;
+    return [element.localName].concat(Array.from(element.classList).slice(0, 2)).join(".");
+  }
+
+  // Only attributes that help find the element in source. data-* values and URL
+  // query strings or fragments can carry tokens.
+  const PICK_ATTRIBUTES = new Set([
+    "id",
+    "class",
+    "name",
+    "type",
+    "role",
+    "alt",
+    "aria-label",
+    "href",
+    "src",
+  ]);
+
+  function pickAttributeValue(attribute) {
+    return attribute.name === "href" || attribute.name === "src"
+      ? attribute.value.split(/[?#]/)[0]
+      : attribute.value;
+  }
+
+  function describePickElement(element) {
+    const chain = [];
+    for (
+      let current = element;
+      isPickableElement(current) && chain.length < PICK_CHAIN_LENGTH;
+      current = current.parentElement
+    ) {
+      chain.unshift(current);
+    }
+    const attributes = Array.from(element.attributes)
+      .filter((attribute) => PICK_ATTRIBUTES.has(attribute.name))
+      .map((attribute) => ` ${attribute.name}="${pickAttributeValue(attribute).replace(/"/g, "&quot;")}"`)
+      .join("");
+    const text = (element.innerText || element.textContent || "").replace(/\s+/g, " ").trim();
+    return {
+      chain: chain.map(pickLabel),
+      html: truncate(`<${element.localName}${attributes}>`, PICK_MAX_HTML_CHARS),
+      text: text ? truncate(text, PICK_MAX_TEXT_CHARS) : undefined,
+    };
+  }
+
+  // Hover asks once per frame, and innerText on a large section forces layout,
+  // so only the rect is re-read while the pointer stays on the same element.
+  // Clicks ask for fresh details since the page may have changed the element.
+  let lastPick = null;
+
+  function describePickTarget(element, fresh) {
+    if (fresh || lastPick?.element !== element) {
+      lastPick = { element, details: describePickElement(element) };
+    }
+    const rect = element.getBoundingClientRect();
+    return {
+      rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+      ...lastPick.details,
+    };
+  }
+
+  function inlineAll(original, clone) {
+    if (original.nodeType !== 1 || clone.nodeType !== 1) return;
+
+    try {
+      const computedStyle = getComputedStyle(original);
+      // cssText on a computed style is the serialized declaration in modern
+      // Chromium/Safari — a single read beats enumerating ~400 longhand
+      // properties. Firefox returns "" here, so we fall back on empty.
+      const serialized = computedStyle.cssText;
+      if (serialized) {
+        clone.style.cssText = serialized;
+      } else {
+        const parts = new Array(computedStyle.length);
+        for (let index = 0; index < computedStyle.length; index += 1) {
+          const property = computedStyle[index];
+          parts[index] = `${property}:${computedStyle.getPropertyValue(property)};`;
+        }
+        clone.style.cssText = parts.join("");
+      }
+    } catch (_error) {}
+
+    const originalChildren = original.children;
+    const clonedChildren = clone.children;
+    for (
+      let index = 0;
+      index < originalChildren.length && index < clonedChildren.length;
+      index += 1
+    ) {
+      inlineAll(originalChildren[index], clonedChildren[index]);
+    }
+  }
+
+  function extractFontUrl(srcValue) {
+    const matches = [
+      ...srcValue.matchAll(
+        /url\(["']?([^"')]+)["']?\)(?:\s*format\(["']?([^"')]+)["']?\))?/gi,
+      ),
+    ];
+    if (matches.length === 0) return null;
+    const woff2 = matches.find((m) => m[2] && m[2].toLowerCase().includes("woff2"));
+    if (woff2) return woff2[1];
+    const woff = matches.find((m) => m[2] && m[2].toLowerCase().includes("woff"));
+    if (woff) return woff[1];
+    return matches[0][1];
+  }
+
+  // Cache resolved font URL -> data URI across captures. Fonts on a page
+  // essentially never change, and a batch run emits multiple captures back to
+  // back — without this we'd refetch + re-base64 every time.
+  const fontDataUriCache = new Map();
+  const SRC_DECLARATION_RE = /src\s*:\s*[^;}]+/i;
+
+  async function fetchAsDataUri(url) {
+    if (fontDataUriCache.has(url)) return fontDataUriCache.get(url);
+    let dataUri = null;
+    try {
+      const response = await fetch(url, { mode: "cors", credentials: "omit" });
+      if (response.ok) {
+        const blob = await response.blob();
+        if (blob.size <= MAX_FONT_BYTES) {
+          dataUri = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () =>
+              resolve(typeof reader.result === "string" ? reader.result : null);
+            reader.onerror = () => resolve(null);
+            reader.readAsDataURL(blob);
+          });
+        }
+      }
+    } catch (_error) {
+      dataUri = null;
+    }
+    fontDataUriCache.set(url, dataUri);
+    return dataUri;
+  }
+
+  function collectFontFaceRuleTexts() {
+    const rules = [];
+    for (const sheet of document.styleSheets) {
+      let cssRules;
+      try {
+        cssRules = sheet.cssRules;
+      } catch (_error) {
+        continue;
+      }
+      if (!cssRules) continue;
+      for (const rule of cssRules) {
+        const cssText = rule.cssText || "";
+        if (cssText.startsWith("@font-face")) rules.push(cssText);
+      }
+    }
+    return rules;
+  }
+
+  async function buildInlinedFontCss() {
+    const ruleTexts = collectFontFaceRuleTexts();
+    if (ruleTexts.length === 0) return null;
+
+    const resolved = ruleTexts.map((cssText) => {
+      if (!SRC_DECLARATION_RE.test(cssText)) return null;
+      const srcMatch = cssText.match(/src\s*:\s*([^;}]+)[;}]/i);
+      if (!srcMatch) return null;
+      const url = extractFontUrl(srcMatch[1]);
+      if (!url) return null;
+      try {
+        return { cssText, url: new URL(url, document.baseURI).href };
+      } catch (_error) {
+        return null;
+      }
+    });
+
+    const dataUris = await Promise.all(
+      resolved.map((entry) => (entry ? fetchAsDataUri(entry.url) : Promise.resolve(null))),
+    );
+
+    const inlined = [];
+    let totalBytes = 0;
+    for (let index = 0; index < resolved.length; index += 1) {
+      const entry = resolved[index];
+      const dataUri = dataUris[index];
+      if (!entry || !dataUri) continue;
+      const approxBytes = dataUri.length * 0.75;
+      if (totalBytes + approxBytes > MAX_TOTAL_FONT_BYTES) break;
+      totalBytes += approxBytes;
+      inlined.push(entry.cssText.replace(SRC_DECLARATION_RE, `src: url("${dataUri}")`));
+    }
+    return inlined.length > 0 ? inlined.join("\n") : null;
+  }
+
+  function stripExternal(clone) {
+    const images = clone.querySelectorAll("img");
+    for (let index = 0; index < images.length; index += 1) {
+      const src = images[index].getAttribute("src");
+      if (src && !src.startsWith("data:")) images[index].removeAttribute("src");
+    }
+
+    const elements = clone.querySelectorAll("*");
+    for (let index = 0; index < elements.length; index += 1) {
+      const style = elements[index].style.cssText;
+      if (style && style.includes("url(")) {
+        elements[index].style.cssText = style.replace(
+          /url\(["']?(?!data:)[^)"']*["']?\)/gi,
+          "none",
+        );
+      }
+    }
+  }
+
+  function emitScroll() {
+    scrollRaf = 0;
+    if (!scrollForwarding) return;
+    postToTrustedTop({
+      type: "INLINE_EDIT_SCROLL",
+      scrollX: window.scrollX,
+      scrollY: window.scrollY,
+      capabilities: PICK_CAPABILITIES,
+    });
+  }
+
+  window.addEventListener(
+    "scroll",
+    function () {
+      if (!scrollForwarding || scrollRaf) return;
+      scrollRaf = requestAnimationFrame(emitScroll);
+    },
+    { passive: true, capture: true },
+  );
+
+  async function handleCaptureRequest(event) {
+    const requestId = event.data.requestId;
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+
+    function postResult(dataUrl) {
+      postToTrustedTop({
+        type: "INLINE_EDIT_SCREENSHOT_RESULT",
+        requestId,
+        dataUrl,
+        scrollX,
+        scrollY,
+      });
+    }
+
+    try {
+      // Wait for any pending web fonts to resolve so both inline metrics and
+      // the @font-face inlining below see the same loaded faces.
+      if (document.fonts && document.fonts.ready) {
+        try {
+          await document.fonts.ready;
+        } catch (_error) {}
+      }
+
+      const clone = document.documentElement.cloneNode(true);
+      inlineAll(document.documentElement, clone);
+
+      const removedNodes = clone.querySelectorAll("script,link[rel=\"stylesheet\"],style");
+      for (let index = 0; index < removedNodes.length; index += 1) {
+        removedNodes[index].remove();
+      }
+
+      stripExternal(clone);
+
+      // Re-embed web fonts as data-URI @font-face rules so the SVG rasterizer
+      // can resolve them — external font URLs aren't fetched during
+      // foreignObject rendering, which would otherwise force a fallback face
+      // and change text metrics.
+      const inlinedFontCss = await buildInlinedFontCss();
+      if (inlinedFontCss) {
+        const styleEl = document.createElement("style");
+        styleEl.textContent = inlinedFontCss;
+        const head = clone.querySelector("head");
+        if (head) head.appendChild(styleEl);
+        else clone.insertBefore(styleEl, clone.firstChild);
+      }
+
+      const html = new XMLSerializer().serializeToString(clone);
+      const svg =
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
+        '<foreignObject width="100%" height="100%">' +
+        `<div xmlns="http://www.w3.org/1999/xhtml" style="width:${width}px;height:${height}px;overflow:hidden">` +
+        `<div style="position:relative;left:-${scrollX}px;top:-${scrollY}px">` +
+        html +
+        "</div></div></foreignObject></svg>";
+      const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+      const image = new Image();
+      image.onload = function () {
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d").drawImage(image, 0, 0);
+        postResult(canvas.toDataURL("image/png"));
+      };
+      image.onerror = function () {
+        postResult(null);
+      };
+      image.src = svgUrl;
+    } catch (_error) {
+      postResult(null);
+    }
+  }
+
+  window.addEventListener("message", function (event) {
+    if (!event.data) return;
+    // Only accept messages from the direct parent frame. Blocks sibling /
+    // unrelated-window postMessage senders that could otherwise reach us.
+    if (event.source !== window.parent) return;
+
+    const trustedParentOrigin = getTrustedParentOrigin(event);
+    if (!trustedParentOrigin) return;
+    trustedTopOrigin = trustedParentOrigin;
+
+    if (event.data.type === "INLINE_EDIT_PICK") {
+      const element = resolvePickTarget(event.data.x, event.data.y);
+      postToTrustedTop({
+        type: "INLINE_EDIT_PICK_RESULT",
+        seq: event.data.seq,
+        target: element ? describePickTarget(element, event.data.fresh === true) : null,
+      });
+      return;
+    }
+
+    if (event.data.type === "INLINE_EDIT_SCROLL_START") {
+      scrollForwarding = true;
+      emitScroll();
+      return;
+    }
+
+    if (event.data.type === "INLINE_EDIT_SCROLL_STOP") {
+      scrollForwarding = false;
+      if (scrollRaf) cancelAnimationFrame(scrollRaf);
+      scrollRaf = 0;
+      return;
+    }
+
+    if (event.data.type === "INLINE_EDIT_SCROLL_BY") {
+      const { deltaX, deltaY, deltaMode } = event.data;
+      if (!scrollForwarding || !Number.isFinite(deltaX) || !Number.isFinite(deltaY)) return;
+      if (deltaMode !== 0 && deltaMode !== 1 && deltaMode !== 2) return;
+      const lineHeight =
+        parseFloat(getComputedStyle(document.documentElement).lineHeight) || DEFAULT_LINE_HEIGHT;
+      const scaleX = deltaMode === 1 ? lineHeight : deltaMode === 2 ? window.innerWidth : 1;
+      const scaleY = deltaMode === 1 ? lineHeight : deltaMode === 2 ? window.innerHeight : 1;
+      // The selection overlay receives the wheel event instead of this iframe.
+      // Instant scrolling preserves trackpad deltas even on smooth-scroll sites.
+      window.scrollBy({ left: deltaX * scaleX, top: deltaY * scaleY, behavior: "instant" });
+      emitScroll();
+      return;
+    }
+
+    if (event.data.type !== "INLINE_EDIT_CAPTURE_REQUEST") return;
+
+    handleCaptureRequest(event);
+  });
+})();
+
+
+</script></body></html>
